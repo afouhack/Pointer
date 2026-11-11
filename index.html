@@ -310,10 +310,31 @@ function renderStatus(){
   if(d===null){el.textContent="Aucune sauvegarde faite pour l’instant";el.className="backup warn"}
   else{el.textContent="Dernière sauvegarde : "+(d===0?"aujourd’hui":d===1?"hier":"il y a "+d+" jours");el.className="backup"+(d>=7?" warn":"")}
 }
+function dm(d){var p=d.split("-");return p[2]+"/"+p[1]}
+function mailBody(ym){
+  var L=[],days=dayAgg(),hs=[];
+  state.hs.forEach(function(e){if(inM(e.date,ym))hs.push({date:e.date,min:e.min,txt:(e.min<0?"Récupération":"Heures sup")+(e.note?" ("+e.note+")":"")})});
+  Object.keys(days).forEach(function(k){if(inM(k,ym)){var d=days[k];hs.push({date:k,min:d.delta,txt:"Heures sup pointées ("+d.list.map(function(x){return hhmm(x.s)+" à "+hhmm(x.e)}).join(", ")+")"})}});
+  hs.sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0});
+  var tot=hs.reduce(function(s,x){return s+x.min},0),bal=state.hs.reduce(function(s,e){return s+e.min},ptDelta());
+  L.push("HEURES SUP — "+monthLabel(ym));
+  L.push("Total du mois : "+fmtH(tot));
+  L.push("Solde total à ce jour : "+fmtH(bal));
+  L.push("");
+  if(!hs.length)L.push("Aucune entrée ce mois-ci.");
+  hs.forEach(function(x){L.push("• "+dm(x.date)+" : "+fmtH(x.min)+" — "+x.txt)});
+  var tr=state.trips.filter(function(t){return inM(t.date,ym)}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0});
+  L.push("");L.push("");
+  L.push("KILOMÈTRES — "+monthLabel(ym));
+  L.push("Total du mois : "+fmtKm(tr.reduce(function(s,t){return s+t.km},0)));
+  L.push("");
+  if(!tr.length)L.push("Aucun trajet ce mois-ci.");
+  tr.forEach(function(t){L.push("• "+dm(t.date)+" : "+fmtKm(t.km)+" — "+(t.label||"Trajet pro")+(t.rt?" (aller-retour)":"")+(t.note?" — "+t.note:""))});
+  return L.join("\n");
+}
 function mailBackup(){
-  var ym=today().slice(0,7),bal=state.hs.reduce(function(s,e){return s+e.min},ptDelta());
-  var body="Sauvegarde "+monthLabel(ym)+"\n\nKILOMÈTRES\n"+csvKm(ym)+"\n\nHEURES SUP\n"+csvHs(ym)+"\n\nPOINTAGES\n"+csvPt(ym)+"\n\nSolde total d’heures sup : "+fmtHplain(bal)+"\n";
-  var url="mailto:?subject="+encodeURIComponent("Km pro & heures sup — "+monthLabel(ym))+"&body="+encodeURIComponent(body);
+  var ym=today().slice(0,7);
+  var url="mailto:?subject="+encodeURIComponent("Heures sup et km — "+monthLabel(ym))+"&body="+encodeURIComponent(mailBody(ym));
   if(url.length>7000){toast("Trop de données ce mois-ci pour un mail : utilise le CSV");return}
   markBackup();
   window.location.href=url;
