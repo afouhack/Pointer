@@ -330,7 +330,7 @@ function mailBody(ym){
   L.push("");
   if(!tr.length)L.push("Aucun trajet ce mois-ci.");
   tr.forEach(function(t){L.push("• "+dm(t.date)+" : "+fmtKm(t.km)+" — "+(t.label||"Trajet pro")+(t.rt?" (aller-retour)":"")+(t.note?" — "+t.note:""))});
-  return L.join("\n");
+  return L.join("\r\n");
 }
 function mailBackup(){
   var ym=today().slice(0,7);
