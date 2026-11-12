@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Km pro & heures sup</title>
+<title>Heures & Km</title>
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" href="icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Pointeuse">
+<meta name="apple-mobile-web-app-title" content="Heures & Km">
 <meta name="theme-color" content="#1f6f5c">
 <style>
 :root{--bg:#f6f5f1;--card:#fff;--ink:#1d2320;--mute:#68716c;--line:#e4e2db;--acc:#1f6f5c;--acc-ink:#fff;--neg:#b4432f;--pos:#1f6f5c}
@@ -66,7 +66,7 @@ input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);borde
 </head>
 <body>
 <main>
-  <h1>Km pro & heures sup</h1>
+  <h1>Heures & Km</h1>
   <div class="tabs" role="tablist">
     <button role="tab" id="tab-hs" aria-selected="true">Pointage & heures sup</button>
     <button role="tab" id="tab-km" aria-selected="false">Kilomètres</button>
@@ -76,6 +76,7 @@ input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);borde
   <div class="backup" id="backup"></div>
   <div class="status" id="status">Chargement…</div>
 </main>
+<input type="file" id="fileIn" accept=".csv,text/csv,text/plain" style="display:none">
 <button class="fab" id="fab">+ Ajouter</button>
 <div class="sheet-bg" id="bg"><div class="sheet" id="sheet"></div></div>
 <div class="toast" id="toast"></div>
@@ -237,8 +238,8 @@ function render(){
     if(!h)h="";
   }
   $("view").innerHTML=h;
-  $("tools").innerHTML='<button class="btn" id="bMail">Envoyer par mail</button><button class="btn" id="bExport">Copier en CSV</button><button class="btn" id="bDl" style="display:none">Télécharger CSV</button><button class="btn" id="bSet">Réglages</button>';
-  if($("bPunch"))$("bPunch").onclick=punch;if($("bCancel"))$("bCancel").onclick=function(ev){ev.preventDefault();state.run=null;toast("Pointage en cours annulé");commit()};if($("bDay"))$("bDay").onclick=function(ev){ev.preventDefault();dayForm(today())};$("bMail").onclick=mailBackup;$("bExport").onclick=copyCsv;renderStatus();$("bSet").onclick=openSettings;
+  $("tools").innerHTML='<button class="btn" id="bMail">Envoyer par mail</button><button class="btn" id="bExport">Copier le CSV</button><button class="btn" id="bDl" style="display:none">Télécharger CSV</button><button class="btn" id="bImp">Importer un CSV</button><button class="btn" id="bSet">Réglages</button>';
+  if($("bPunch"))$("bPunch").onclick=punch;if($("bCancel"))$("bCancel").onclick=function(ev){ev.preventDefault();state.run=null;toast("Pointage en cours annulé");commit()};if($("bDay"))$("bDay").onclick=function(ev){ev.preventDefault();dayForm(today())};$("bMail").onclick=mailBackup;$("bImp").onclick=importCsv;$("bExport").onclick=copyCsv;renderStatus();$("bSet").onclick=openSettings;
   if(dlOK){$("bDl").style.display="";$("bDl").onclick=downloadCsv}
 }
 
@@ -296,12 +297,185 @@ function openSettings(){
 }
 
 /* ---------- export ---------- */
-function q(s){s=String(s==null?"":s);return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}
+function q(s){s=String(s==null?"":s);return /[;"\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s}
 function inM(d,ym){return !ym||d.slice(0,7)===ym}
-function csvKm(ym){return "Date;Destination;Aller-retour;Km;Note\n"+state.trips.filter(function(t){return inM(t.date,ym)}).sort(function(a,b){return a.date<b.date?-1:1}).map(function(t){return [t.date,q(t.label),t.rt?"oui":"non",String(t.km).replace(".",","),q(t.note)].join(";")}).join("\n")}
-function csvHs(ym){return "Date;Type;Minutes;Heures;Note\n"+state.hs.filter(function(e){return inM(e.date,ym)}).sort(function(a,b){return a.date<b.date?-1:1}).map(function(e){return [e.date,e.min<0?"Récupération":"Heures sup",e.min,String(Math.round(e.min/60*100)/100).replace(".",","),q(e.note)].join(";")}).join("\n")}
-function csvPt(ym){var m=dayAgg(),t=today();return "Date;Plages;Minutes d’heures sup\n"+Object.keys(m).sort().filter(function(k){return inM(k,ym)}).map(function(k){var d=m[k];return [k,q(d.list.map(function(x){return hhmm(x.s)+"-"+hhmm(x.e)}).join(" ")),d.worked].join(";")}).join("\n")}
-function csv(){return tab==="km"?csvKm():csvHs()+"\n\n"+csvPt()}
+/* ---------- sauvegarde complète : CSV + tableur ---------- */
+var COLS=["Type","Id","Date","Début","Fin","Minutes","Libellé","Km","AllerRetour","Note"];
+var XLSX_MIME="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+function byDate(a,b){return a.date<b.date?-1:a.date>b.date?1:(a.s||0)-(b.s||0)}
+function csvFull(){
+  var rows=[COLS.join(";")];
+  function r(a){rows.push(a.map(q).join(";"))}
+  state.trips.slice().sort(byDate).forEach(function(t){r(["Trajet",t.id,t.date,"","","",t.label||"",String(t.km).replace(".",","),t.rt?"oui":"non",t.note||""])});
+  state.hs.slice().sort(byDate).forEach(function(e){r(["Heures",e.id,e.date,"","",e.min,"","","",e.note||""])});
+  state.sessions.slice().sort(byDate).forEach(function(x){r(["Pointage",x.id,x.date,hhmm(x.s),hhmm(x.e),x.e-x.s,"","","",""])});
+  if(state.rate)r(["Réglage","","","","","","taux_km","","",state.rate]);
+  return rows.join("\r\n");
+}
+function csv(){return csvFull()}
+
+/* ---------- import CSV ---------- */
+function parseCsv(text){
+  text=text.replace(/^\ufeff/,"");
+  var first=text.split(/\r?\n/)[0]||"",sep=first.split(";").length>=first.split(",").length?";":",";
+  var rows=[],row=[],f="",inq=false;
+  for(var i=0;i<text.length;i++){
+    var c=text[i];
+    if(inq){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else inq=false}else f+=c}
+    else if(c==='"')inq=true;
+    else if(c===sep){row.push(f);f=""}
+    else if(c==="\n"){row.push(f);rows.push(row);row=[];f=""}
+    else if(c!=="\r")f+=c;
+  }
+  if(f!==""||row.length){row.push(f);rows.push(row)}
+  return rows.filter(function(r){return r.some(function(x){return x.trim()!==""})});
+}
+function normDate(v){
+  v=(v||"").trim();var m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return m[1]+"-"+m[2]+"-"+m[3];
+  m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  return null;
+}
+function numFr(v){var n=parseFloat(String(v||"").replace(/\s/g,"").replace(",","."));return isFinite(n)?n:null}
+function parseBackup(text){
+  var rows=parseCsv(text);if(rows.length<2)return null;
+  var head=rows[0].map(function(x){return x.trim().toLowerCase()});
+  function ix(n){return head.indexOf(n.toLowerCase())}
+  var iT=ix("Type"),iI=ix("Id"),iD=ix("Date"),iS=ix("Début"),iE=ix("Fin"),iM=ix("Minutes"),iL=ix("Libellé"),iK=ix("Km"),iR=ix("AllerRetour"),iN=ix("Note");
+  if(iT<0||iD<0)return null;
+  var out={trips:[],hs:[],sessions:[],rate:"",skipped:0};
+  rows.slice(1).forEach(function(row){
+    function g(i){return i>=0&&i<row.length?row[i].trim():""}
+    var type=g(iT).toLowerCase(),date=normDate(g(iD));
+    if(type==="trajet"){
+      var km=numFr(g(iK));
+      if(!date||!(km>0)){out.skipped++;return}
+      out.trips.push({id:g(iI)||uid(),date:date,label:g(iL),km:Math.round(km*10)/10,rt:/^(oui|1|true|vrai)/i.test(g(iR)),note:g(iN)});
+    }else if(type==="heures"){
+      var mn=Math.round(numFr(g(iM))||0);
+      if(!date||!mn){out.skipped++;return}
+      out.hs.push({id:g(iI)||uid(),date:date,min:mn,note:g(iN)});
+    }else if(type==="pointage"){
+      var s=parseT(g(iS)),e=parseT(g(iE));
+      if(!date||s==null||e==null||!(e>s)){out.skipped++;return}
+      out.sessions.push({id:g(iI)||uid(),date:date,s:s,e:e});
+    }else if(type==="réglage"||type==="reglage"){
+      if(g(iL)==="taux_km")out.rate=g(iN);
+    }else out.skipped++;
+  });
+  return out;
+}
+function importCsv(){var f=$("fileIn");f.value="";f.click()}
+function importSheet(res){
+  openSheet('<h2>Importer une sauvegarde</h2><div style="font-size:15px">Trouvé dans le fichier :<br>• '+res.trips.length+' trajet(s)<br>• '+res.hs.length+' entrée(s) d’heures sup / récupérations<br>• '+res.sessions.length+' plage(s) de pointage'+(res.skipped?'<br><span class="hint">'+res.skipped+' ligne(s) ignorée(s) (illisibles)</span>':'')+'</div><div class="actions" style="flex-direction:column"><button class="btn p" id="i-merge">Ajouter à mes données</button><button class="btn d" id="i-rep">Tout remplacer par ce fichier</button><button class="btn" id="i-cancel">Annuler</button></div><div class="hint">« Ajouter » ignore ce qui existe déjà. « Tout remplacer » efface les données actuelles avant de charger le fichier.</div>');
+  $("i-cancel").onclick=closeSheet;
+  $("i-merge").onclick=function(){
+    function add(list,items){var have={};list.forEach(function(x){have[x.id]=1});var n=0;items.forEach(function(x){if(!have[x.id]){list.push(x);n++}});return n}
+    var n=add(state.trips,res.trips)+add(state.hs,res.hs)+add(state.sessions,res.sessions);
+    if(res.rate&&!state.rate)state.rate=res.rate;
+    closeSheet();commit();toast(n+" ligne(s) ajoutée(s)");
+  };
+  $("i-rep").onclick=function(){
+    var b=$("i-rep");
+    if(!b.dataset.c){b.dataset.c=1;b.textContent="Confirmer : tout remplacer ?";return}
+    state.trips=res.trips;state.hs=res.hs;state.sessions=res.sessions;state.run=null;if(res.rate)state.rate=res.rate;
+    closeSheet();commit();toast("Données restaurées");
+  };
+}
+$("fileIn").onchange=function(){
+  var f=this.files&&this.files[0];if(!f)return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var res=null;try{res=parseBackup(String(rd.result))}catch(e){}
+    if(!res||(!res.trips.length&&!res.hs.length&&!res.sessions.length)){toast("Fichier non reconnu : utilise un CSV créé par l’appli");return}
+    importSheet(res);
+  };
+  rd.onerror=function(){toast("Lecture du fichier impossible")};
+  rd.readAsText(f);
+};
+
+/* ---------- tableur .xlsx (sans bibliothèque) ---------- */
+function crc32(u8){
+  if(!crc32.t){crc32.t=[];for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;crc32.t[n]=c>>>0}}
+  var crc=-1;for(var i=0;i<u8.length;i++)crc=crc32.t[(crc^u8[i])&255]^(crc>>>8);
+  return (crc^-1)>>>0;
+}
+function zipStore(files){
+  var enc=new TextEncoder(),chunks=[],cd=[],off=0;
+  function u16(v){return [v&255,(v>>8)&255]}
+  function u32(v){return [v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255]}
+  files.forEach(function(f){
+    var nm=enc.encode(f.name),data=enc.encode(f.text),crc=crc32(data),sz=data.length;
+    var lh=[].concat(u32(0x04034b50),u16(20),u16(0x0800),u16(0),u16(0),u16(0x21),u32(crc),u32(sz),u32(sz),u16(nm.length),u16(0));
+    chunks.push(new Uint8Array(lh),nm,data);
+    var ch=[].concat(u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(0),u16(0),u16(0x21),u32(crc),u32(sz),u32(sz),u16(nm.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(off));
+    cd.push(new Uint8Array(ch),nm);
+    off+=lh.length+nm.length+sz;
+  });
+  var cds=0;cd.forEach(function(c){cds+=c.length});
+  var end=[].concat(u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),u32(cds),u32(off),u16(0));
+  return new Blob(chunks.concat(cd,[new Uint8Array(end)]),{type:XLSX_MIME});
+}
+function xe(s){return String(s).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function xdate(d){var p=d.split("-");return Math.round((Date.UTC(+p[0],+p[1]-1,+p[2])-Date.UTC(1899,11,30))/864e5)}
+function sheetXml(rows,widths){
+  var x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>'+widths.map(function(w,i){return '<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>'}).join("")+'</cols><sheetData>';
+  rows.forEach(function(row,ri){
+    x+='<row r="'+(ri+1)+'">';
+    row.forEach(function(c,ci){
+      if(c===null||c===undefined||c==="")return;
+      var ref=String.fromCharCode(65+ci)+(ri+1);
+      if(ri===0)x+='<c r="'+ref+'" t="inlineStr" s="1"><is><t>'+xe(c)+'</t></is></c>';
+      else if(typeof c==="number")x+='<c r="'+ref+'" s="3"><v>'+c+'</v></c>';
+      else if(c&&c.d)x+='<c r="'+ref+'" s="2"><v>'+xdate(c.d)+'</v></c>';
+      else x+='<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+xe(c)+'</t></is></c>';
+    });
+    x+='</row>';
+  });
+  return x+'</sheetData></worksheet>';
+}
+function r2(n){return Math.round(n*100)/100}
+function buildXlsx(){
+  var yr=today().slice(0,4),ptMin=dayAgg();
+  var hsRows=[["Date","Type","Détail","Durée (h)","Durée (min)","Note"]],hsAll=[];
+  state.hs.forEach(function(e){hsAll.push({date:e.date,s:0,row:[{d:e.date},e.min<0?"Récupération":"Heures sup","Saisie manuelle",r2(e.min/60),e.min,e.note||""]})});
+  state.sessions.forEach(function(x){hsAll.push({date:x.date,s:x.s,row:[{d:x.date},"Heures sup pointées",hhmm(x.s)+" à "+hhmm(x.e),r2((x.e-x.s)/60),x.e-x.s,""]})});
+  hsAll.sort(byDate).forEach(function(o){hsRows.push(o.row)});
+  var kmRows=[["Date","Destination","Aller-retour","Km","Note"]];
+  state.trips.slice().sort(byDate).forEach(function(t){kmRows.push([{d:t.date},t.label||"Trajet pro",t.rt?"oui":"non",t.km,t.note||""])});
+  var months={};
+  function mo(k){return months[k]=months[k]||{h:0,km:0}}
+  state.hs.forEach(function(e){mo(e.date.slice(0,7)).h+=e.min});
+  state.sessions.forEach(function(x){mo(x.date.slice(0,7)).h+=x.e-x.s});
+  state.trips.forEach(function(t){mo(t.date.slice(0,7)).km+=t.km});
+  var mRows=[["Mois","Heures sup (h)","Km"]];
+  Object.keys(months).sort().forEach(function(k){mRows.push([monthLabel(k),r2(months[k].h/60),Math.round(months[k].km*10)/10])});
+  var bal=state.hs.reduce(function(s,e){return s+e.min},0)+state.sessions.reduce(function(s,x){return s+x.e-x.s},0);
+  var kmY=0,kmT=0;state.trips.forEach(function(t){kmT+=t.km;if(t.date.slice(0,4)===yr)kmY+=t.km});
+  var sRows=[["Indicateur","Valeur"],["Solde d’heures sup (h)",r2(bal/60)],["Km cette année ("+yr+")",Math.round(kmY*10)/10],["Km au total",Math.round(kmT*10)/10],["Fichier généré le",today().split("-").reverse().join("/")]];
+  var sheets=[["Résumé",sRows,[34,16]],["Par mois",mRows,[22,16,12]],["Heures sup",hsRows,[13,22,24,12,13,30]],["Kilomètres",kmRows,[13,32,14,10,30]]];
+  var X='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',NS='xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',RN='http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  var files=[
+    {name:"[Content_Types].xml",text:X+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map(function(_,i){return '<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'}).join("")+'</Types>'},
+    {name:"_rels/.rels",text:X+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="'+RN+'/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:"xl/workbook.xml",text:X+'<workbook '+NS+' xmlns:r="'+RN+'"><sheets>'+sheets.map(function(s,i){return '<sheet name="'+xe(s[0])+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>'}).join("")+'</sheets></workbook>'},
+    {name:"xl/_rels/workbook.xml.rels",text:X+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map(function(_,i){return '<Relationship Id="rId'+(i+1)+'" Type="'+RN+'/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>'}).join("")+'<Relationship Id="rId'+(sheets.length+1)+'" Type="'+RN+'/styles" Target="styles.xml"/></Relationships>'},
+    {name:"xl/styles.xml",text:X+'<styleSheet '+NS+'><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'}
+  ];
+  sheets.forEach(function(s,i){files.push({name:"xl/worksheets/sheet"+(i+1)+".xml",text:sheetXml(s[1],s[2])})});
+  return zipStore(files);
+}
+
+/* ---------- envoi par mail avec pièces jointes ---------- */
+function backupFiles(){
+  var st=today();
+  return [
+    new File(["\ufeff"+csvFull()],"sauvegarde-km-heures-"+st+".csv",{type:"text/csv"}),
+    new File([buildXlsx()],"tableur-km-heures-"+st+".xlsx",{type:XLSX_MIME})
+  ];
+}
+
 function markBackup(){state.rev=Date.now();state.last=new Date().toISOString();saveLocal();flush();renderStatus()}
 function daysSince(){if(!state.last)return null;return Math.floor((Date.now()-new Date(state.last).getTime())/86400000)}
 function renderStatus(){
@@ -332,16 +506,31 @@ function mailBody(ym){
   tr.forEach(function(t){L.push("• "+dm(t.date)+" : "+fmtKm(t.km)+" — "+(t.label||"Trajet pro")+(t.rt?" (aller-retour)":"")+(t.note?" — "+t.note:""))});
   return L.join("\r\n");
 }
-function mailBackup(){
+function mailtoFallback(){
   var ym=today().slice(0,7);
   var url="mailto:?subject="+encodeURIComponent("Heures sup et km — "+monthLabel(ym))+"&body="+encodeURIComponent(mailBody(ym));
-  if(url.length>7000){toast("Trop de données ce mois-ci pour un mail : utilise le CSV");return}
+  if(url.length>7000){toast("Trop de données pour un mail texte : utilise le CSV");return}
   markBackup();
   window.location.href=url;
 }
+async function mailBackup(){
+  var ym=today().slice(0,7),subject="Heures sup et km — "+monthLabel(ym);
+  try{
+    var files=backupFiles();
+    if(navigator.share&&navigator.canShare&&navigator.canShare({files:files})){
+      await navigator.share({files:files,title:subject,text:mailBody(ym).replace(/\r\n/g,"\n")});
+      markBackup();
+      return;
+    }
+  }catch(e){
+    if(e&&e.name==="AbortError")return;
+  }
+  toast("Pièces jointes impossibles ici : mail texte seulement");
+  mailtoFallback();
+}
 async function copyCsv(){try{await navigator.clipboard.writeText(csv());markBackup();toast("CSV copié")}catch(e){toast("Copie impossible ici")}}
 var dl=null,dlOK=false;
-async function downloadCsv(){try{await dl.save({filename:(tab==="km"?"km-pro":"heures-sup")+".csv",data:"\ufeff"+csv()});markBackup()}catch(e){toast("Téléchargement annulé")}}
+async function downloadCsv(){try{await dl.save({filename:"sauvegarde-km-heures-"+today()+".csv",data:"\ufeff"+csv()});markBackup()}catch(e){toast("Téléchargement annulé")}}
 
 /* ---------- events ---------- */
 $("tab-km").onclick=function(){tab="km";render()};
